@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 pub use ggrs;
 
-pub use rollback::{Rollback, RollbackFlag};
+pub use rollback::{AddRollbackCommandExtension, AddRollbackCommand, Rollback};
 pub use session::Session;
 pub use resource_snapshot::ResourceRollbackPlugin;
 
@@ -22,6 +22,13 @@ pub(crate) mod world_snapshot;
 pub(crate) mod rollback;
 pub(crate) mod session;
 pub(crate) mod resource_snapshot;
+
+pub mod prelude {
+    pub use crate::{
+        AddRollbackCommandExtension, Rollback, GGRSSchedule, PlayerInputs,
+        GGRSPlugin, Session
+    };
+}
 
 const DEFAULT_FPS: usize = 60;
 
