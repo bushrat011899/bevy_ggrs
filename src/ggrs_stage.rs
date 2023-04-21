@@ -1,4 +1,4 @@
-use crate::{world_snapshot::WorldSnapshot, GGRSSchedule, PlayerInputs, Session, Frame, GGRSSaveSchedule, GGRSLoadSchedule, GameStateCell};
+use crate::{world_snapshot::WorldSnapshot, Session, Frame, GameStateCell};
 use bevy::{prelude::*, reflect::TypeRegistry};
 use ggrs::{
     Config, GGRSError, GGRSRequest, PlayerHandle, SessionState,
@@ -19,8 +19,6 @@ where
     snapshots: Vec<WorldSnapshot>,
     /// fixed FPS our logic is running with
     update_frequency: usize,
-    /// counts the number of frames that have been executed
-    frame: i32,
     /// internal time control variables
     last_update: Instant,
     /// accumulated time. once enough time has been accumulated, an update is executed
@@ -50,7 +48,7 @@ impl<T: Config + Send + Sync> GGRSStage<T> {
         }
 
         // if we accumulated enough time, do steps
-        while stage.accumulator.as_secs_f64() > fps_delta {
+        if stage.accumulator.as_secs_f64() > fps_delta {
             // decrease accumulator
             stage.accumulator = stage
                 .accumulator
@@ -59,7 +57,7 @@ impl<T: Config + Send + Sync> GGRSStage<T> {
             // depending on the session type, doing a single update looks a bit different
             let Some(session) = world.get_resource::<Session<T>>() else {
                 stage.reset();
-                continue;
+                return;
             };
 
             let requests = match session {
@@ -68,11 +66,7 @@ impl<T: Config + Send + Sync> GGRSStage<T> {
                 &Session::SpectatorSession(_) => stage.run_spectator(world),
             };
 
-            world.insert_resource(stage);
-            for request in requests {
-                Self::handle_request(world, request);
-            }
-            stage = world.remove_resource::<Self>().unwrap();
+            world.send_event_batch(requests);
         }
 
         world.insert_resource(stage);
@@ -85,7 +79,6 @@ impl<T: Config> GGRSStage<T> {
             type_registry: TypeRegistry::default(),
             input_system,
             snapshots: Vec::new(),
-            frame: 0,
             update_frequency: 60,
             last_update: Instant::now(),
             accumulator: Duration::ZERO,
@@ -96,7 +89,6 @@ impl<T: Config> GGRSStage<T> {
     pub(crate) fn reset(&mut self) {
         self.last_update = Instant::now();
         self.accumulator = Duration::ZERO;
-        self.frame = 0;
         self.run_slow = false;
         self.snapshots = Vec::new();
     }
@@ -215,13 +207,11 @@ impl<T: Config> GGRSStage<T> {
             let frame = world.get_resource::<Frame>().unwrap();
             let cell = world.get_resource::<GameStateCell<T>>().unwrap();
 
-            assert_eq!(stage.frame, frame.0);
-
             // we make a snapshot of our world
             let snapshot = WorldSnapshot::from_world(world, &stage.type_registry);
 
             // we don't really use the buffer provided by GGRS
-            cell.save(stage.frame, None, Some(snapshot.checksum as u128));
+            cell.save(frame.0, None, Some(snapshot.checksum as u128));
 
             // store the snapshot ourselves (since the snapshots don't implement clone)
             let pos = frame.0 as usize % stage.snapshots.len();
@@ -230,11 +220,9 @@ impl<T: Config> GGRSStage<T> {
     }
 
     pub(crate) fn load_world_using_reflection(world: &mut World) {
-        world.resource_scope(|world, mut stage: Mut<Self>| {
+        world.resource_scope(|world, stage: Mut<Self>| {
             let frame = world.get_resource::<Frame>().unwrap();
             let _cell = world.get_resource::<GameStateCell<T>>().unwrap();
-
-            stage.frame = frame.0;
     
             // we get the correct snapshot
             let pos = frame.0 as usize % stage.snapshots.len();
@@ -251,55 +239,5 @@ impl<T: Config> GGRSStage<T> {
 
     pub(crate) fn set_type_registry(&mut self, type_registry: TypeRegistry) {
         self.type_registry = type_registry;
-    }
-
-    pub(crate) fn handle_request(world: &mut World, request: GGRSRequest<T>) {
-        match request {
-            GGRSRequest::SaveGameState { cell, frame } => {
-                debug!("saving snapshot for frame {frame}");
-
-                world.insert_resource(Frame(frame));
-                world.insert_resource(GameStateCell::<T>(cell));
-
-                world.run_schedule(GGRSSaveSchedule);
-
-                world.remove_resource::<GameStateCell::<T>>();
-            },
-
-            GGRSRequest::LoadGameState { cell, frame } => {
-                debug!("restoring snapshot for frame {frame}");
-
-                world.insert_resource(Frame(frame));
-                world.insert_resource(GameStateCell::<T>(cell));
-
-                world.run_schedule(GGRSLoadSchedule);
-
-                world.remove_resource::<GameStateCell::<T>>();
-            },
-
-            GGRSRequest::AdvanceFrame { inputs } => {
-                let next_frame = world
-                    .get_resource::<Frame>()
-                    .copied()
-                    .unwrap_or_default()
-                    .next();
-
-                debug!("advancing to frame: {}", next_frame.0);
-
-                world.insert_resource(PlayerInputs::<T>(inputs));
-
-                world.run_schedule(GGRSSchedule);
-
-                world.remove_resource::<PlayerInputs<T>>();
-
-                debug!("frame {} completed", next_frame.0);
-
-                world.insert_resource(next_frame);
-
-                world.resource_scope(|_world, mut stage: Mut<Self>| {
-                    stage.frame = next_frame.0
-                });
-            },
-        }
     }
 }

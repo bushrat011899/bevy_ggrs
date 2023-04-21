@@ -2,13 +2,14 @@
 #![forbid(unsafe_code)] // let us try
 
 use bevy::{
-    ecs::schedule::{LogLevel, ScheduleBuildSettings, ScheduleLabel},
+    ecs::schedule::{LogLevel, ScheduleBuildSettings},
     prelude::*,
     reflect::{FromType, GetTypeRegistration, TypeRegistry, TypeRegistryInternal},
 };
-use ggrs::{Config, InputStatus, PlayerHandle};
+use ggrs::{Config, InputStatus, PlayerHandle, GGRSEvent, GGRSRequest};
 use ggrs_stage::GGRSStage;
 use parking_lot::RwLock;
+use scheduling::run_schedules;
 use std::sync::Arc;
 
 pub use ggrs;
@@ -16,40 +17,32 @@ pub use ggrs;
 pub use rollback::{AddRollbackCommandExtension, AddRollbackCommand, Rollback};
 pub use session::Session;
 pub use resource_snapshot::ResourceRollbackPlugin;
+pub use component_snapshot::ComponentRollbackPlugin;
+pub use scheduling::{GGRSSchedule, GGRSSaveSchedule, GGRSLoadSchedule};
 
 pub(crate) mod ggrs_stage;
 pub(crate) mod world_snapshot;
 pub(crate) mod rollback;
 pub(crate) mod session;
 pub(crate) mod resource_snapshot;
+pub(crate) mod component_snapshot;
+pub(crate) mod scheduling;
 
 pub mod prelude {
     pub use crate::{
         AddRollbackCommandExtension, Rollback, GGRSSchedule, PlayerInputs,
-        GGRSPlugin, Session
+        GGRSPlugin, Session, ResourceRollbackPlugin, ComponentRollbackPlugin
     };
 }
 
 const DEFAULT_FPS: usize = 60;
 
-/// Schedule run during the frame-advancement stage of GGRS rollback networking.
-#[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
-pub struct GGRSSchedule;
-
-/// Schedule run during the saving stage of GGRS rollback networking.
-#[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
-pub struct GGRSSaveSchedule;
-
-/// Schedule run during the loading stage of GGRS rollback networking.
-#[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
-pub struct GGRSLoadSchedule;
-
 // TODO: more specific name to avoid conflicts?
 #[derive(Resource, Deref, DerefMut)]
-pub struct PlayerInputs<T: Config>(Vec<(T::Input, InputStatus)>);
+pub struct PlayerInputs<T: Config>(pub(crate) Vec<(T::Input, InputStatus)>);
 
 #[derive(Resource, Deref, DerefMut, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Frame(ggrs::Frame);
+pub struct Frame(pub(crate) ggrs::Frame);
 
 impl Frame {
     pub fn next(self) -> Self {
@@ -58,7 +51,7 @@ impl Frame {
 }
 
 #[derive(Resource, Deref, DerefMut)]
-pub struct GameStateCell<T: Config>(ggrs::GameStateCell<T::State>);
+pub struct GameStateCell<T: Config>(pub(crate) ggrs::GameStateCell<T::State>);
 
 /// A builder to configure GGRS for a bevy app.
 pub struct GGRSPlugin<T: Config + Send + Sync> {
@@ -154,6 +147,9 @@ impl<T: Config + Send + Sync> GGRSPlugin<T> {
         stage.set_type_registry(self.type_registry);
         app.insert_resource(stage);
 
+        app.add_event::<GGRSRequest<T>>();
+        app.add_event::<GGRSEvent<T>>();
+
         let mut advance_schedule = Schedule::default();
         let mut save_schedule = Schedule::default();
         let mut load_schedule = Schedule::default();
@@ -177,7 +173,14 @@ impl<T: Config + Send + Sync> GGRSPlugin<T> {
         app.add_schedule(GGRSSaveSchedule, save_schedule);
         app.add_schedule(GGRSLoadSchedule, load_schedule);
 
-        app.add_system(GGRSStage::<T>::run.in_base_set(CoreSet::PreUpdate));
+        app.add_systems(
+            (
+                GGRSStage::<T>::run,
+                run_schedules::<T>
+            )
+            .chain()
+            .in_base_set(CoreSet::PreUpdate)
+        );
         app.add_system(
             GGRSStage::<T>::save_world_using_reflection
                 .in_schedule(GGRSSaveSchedule)

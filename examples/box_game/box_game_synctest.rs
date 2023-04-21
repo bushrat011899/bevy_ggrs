@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_ggrs::{GGRSPlugin, GGRSSchedule, Session, ResourceRollbackPlugin};
+use bevy_ggrs::prelude::*;
 use ggrs::{PlayerType, SessionBuilder};
 use structopt::StructOpt;
 
@@ -43,7 +43,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // define system that returns inputs given a player handle, so GGRS can send the inputs around
         .with_input_system(input)
         // register types of components AND resources you want to be rolled back
-        .register_rollback_component::<Transform>()
         .register_rollback_component::<Velocity>()
         // make it happen in the bevy app
         .build(&mut app);
@@ -52,6 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.insert_resource(opt)
         .add_plugins(DefaultPlugins)
         .add_plugin(ResourceRollbackPlugin.for_type::<FrameCount>().with_config::<GGRSConfig>())
+        .add_plugin(ComponentRollbackPlugin.for_type::<Transform>().with_config::<GGRSConfig>())
         .add_startup_system(setup_system)
         // these systems will be executed as part of the advance frame update
         .add_systems((move_cube_system, increase_frame_system).in_schedule(GGRSSchedule))
