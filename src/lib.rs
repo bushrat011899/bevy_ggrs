@@ -41,8 +41,14 @@ pub struct GGRSLoadSchedule;
 #[derive(Resource, Deref, DerefMut)]
 pub struct PlayerInputs<T: Config>(Vec<(T::Input, InputStatus)>);
 
-#[derive(Resource, Deref, DerefMut, Clone, Copy, PartialEq, Eq)]
+#[derive(Resource, Deref, DerefMut, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Frame(ggrs::Frame);
+
+impl Frame {
+    pub fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
 
 #[derive(Resource, Deref, DerefMut)]
 pub struct GameStateCell<T: Config>(ggrs::GameStateCell<T::State>);

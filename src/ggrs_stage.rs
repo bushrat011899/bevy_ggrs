@@ -70,50 +70,7 @@ impl<T: Config + Send + Sync> GGRSStage<T> {
 
             world.insert_resource(stage);
             for request in requests {
-                match request {
-                    GGRSRequest::SaveGameState { cell, frame } => {
-                        debug!("saving snapshot for frame {frame}");
-
-                        world.insert_resource(Frame(frame));
-                        world.insert_resource(GameStateCell::<T>(cell));
-
-                        world.run_schedule(GGRSSaveSchedule);
-
-                        world.remove_resource::<GameStateCell::<T>>();
-                    },
-
-                    GGRSRequest::LoadGameState { cell, frame } => {
-                        debug!("restoring snapshot for frame {frame}");
-
-                        world.insert_resource(Frame(frame));
-                        world.insert_resource(GameStateCell::<T>(cell));
-
-                        world.run_schedule(GGRSLoadSchedule);
-
-                        world.remove_resource::<GameStateCell::<T>>();
-                    },
-
-                    GGRSRequest::AdvanceFrame { inputs } => {
-                        let mut frame = *world.get_resource::<Frame>().unwrap_or(&Frame(0));
-
-                        debug!("advancing to frame: {}", frame.0 + 1);
-
-                        world.insert_resource(PlayerInputs::<T>(inputs));
-
-                        world.run_schedule(GGRSSchedule);
-
-                        world.remove_resource::<PlayerInputs<T>>();
-
-                        frame.0 += 1;
-                        debug!("frame {} completed", frame.0);
-
-                        world.insert_resource(frame);
-
-                        world.resource_scope(|_world, mut stage: Mut<Self>| {
-                            stage.frame = frame.0
-                        });
-                    },
-                }
+                Self::handle_request(world, request);
             }
             stage = world.remove_resource::<Self>().unwrap();
         }
@@ -294,5 +251,55 @@ impl<T: Config> GGRSStage<T> {
 
     pub(crate) fn set_type_registry(&mut self, type_registry: TypeRegistry) {
         self.type_registry = type_registry;
+    }
+
+    pub(crate) fn handle_request(world: &mut World, request: GGRSRequest<T>) {
+        match request {
+            GGRSRequest::SaveGameState { cell, frame } => {
+                debug!("saving snapshot for frame {frame}");
+
+                world.insert_resource(Frame(frame));
+                world.insert_resource(GameStateCell::<T>(cell));
+
+                world.run_schedule(GGRSSaveSchedule);
+
+                world.remove_resource::<GameStateCell::<T>>();
+            },
+
+            GGRSRequest::LoadGameState { cell, frame } => {
+                debug!("restoring snapshot for frame {frame}");
+
+                world.insert_resource(Frame(frame));
+                world.insert_resource(GameStateCell::<T>(cell));
+
+                world.run_schedule(GGRSLoadSchedule);
+
+                world.remove_resource::<GameStateCell::<T>>();
+            },
+
+            GGRSRequest::AdvanceFrame { inputs } => {
+                let next_frame = world
+                    .get_resource::<Frame>()
+                    .copied()
+                    .unwrap_or_default()
+                    .next();
+
+                debug!("advancing to frame: {}", next_frame.0);
+
+                world.insert_resource(PlayerInputs::<T>(inputs));
+
+                world.run_schedule(GGRSSchedule);
+
+                world.remove_resource::<PlayerInputs<T>>();
+
+                debug!("frame {} completed", next_frame.0);
+
+                world.insert_resource(next_frame);
+
+                world.resource_scope(|_world, mut stage: Mut<Self>| {
+                    stage.frame = next_frame.0
+                });
+            },
+        }
     }
 }
