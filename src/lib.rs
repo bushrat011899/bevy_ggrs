@@ -6,7 +6,7 @@ use bevy::{
     prelude::*,
     reflect::{FromType, GetTypeRegistration, TypeRegistry, TypeRegistryInternal},
 };
-use ggrs::{Config, InputStatus, P2PSession, PlayerHandle, SpectatorSession, SyncTestSession};
+use ggrs::{Config, InputStatus, PlayerHandle};
 use ggrs_stage::GGRSStage;
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -14,27 +14,36 @@ use std::sync::Arc;
 pub use ggrs;
 
 pub use rollback::{Rollback, RollbackFlag};
+pub use session::Session;
 
 pub(crate) mod ggrs_stage;
 pub(crate) mod world_snapshot;
 pub(crate) mod rollback;
+pub(crate) mod session;
 
 const DEFAULT_FPS: usize = 60;
 
+/// Schedule run during the frame-advancement stage of GGRS rollback networking.
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct GGRSSchedule;
 
-/// Defines the Session that the GGRS Plugin should expect as a resource.
-#[derive(Resource)]
-pub enum Session<T: Config> {
-    SyncTestSession(SyncTestSession<T>),
-    P2PSession(P2PSession<T>),
-    SpectatorSession(SpectatorSession<T>),
-}
+/// Schedule run during the saving stage of GGRS rollback networking.
+#[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct GGRSSaveSchedule;
+
+/// Schedule run during the loading stage of GGRS rollback networking.
+#[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct GGRSLoadSchedule;
 
 // TODO: more specific name to avoid conflicts?
 #[derive(Resource, Deref, DerefMut)]
 pub struct PlayerInputs<T: Config>(Vec<(T::Input, InputStatus)>);
+
+#[derive(Resource, Deref, DerefMut, Clone, Copy, PartialEq, Eq)]
+pub struct Frame(ggrs::Frame);
+
+#[derive(Resource, Deref, DerefMut)]
+pub struct GameStateCell<T: Config>(ggrs::GameStateCell<T::State>);
 
 /// A builder to configure GGRS for a bevy app.
 pub struct GGRSPlugin<T: Config + Send + Sync> {
@@ -122,20 +131,39 @@ impl<T: Config + Send + Sync> GGRSPlugin<T> {
         let mut input_system = self
             .input_system
             .expect("Adding an input system through GGRSBuilder::with_input_system is required");
+
         // ggrs stage
         input_system.initialize(&mut app.world);
         let mut stage = GGRSStage::<T>::new(input_system);
         stage.set_update_frequency(self.fps);
 
-        let mut schedule = Schedule::default();
-        schedule.set_build_settings(ScheduleBuildSettings {
+        let mut advance_schedule = Schedule::default();
+        let mut save_schedule = Schedule::default();
+        let mut load_schedule = Schedule::default();
+
+        advance_schedule.set_build_settings(ScheduleBuildSettings {
             ambiguity_detection: LogLevel::Error,
             ..default()
         });
-        app.add_schedule(GGRSSchedule, schedule);
+
+        save_schedule.set_build_settings(ScheduleBuildSettings {
+            ambiguity_detection: LogLevel::Error,
+            ..default()
+        });
+
+        load_schedule.set_build_settings(ScheduleBuildSettings {
+            ambiguity_detection: LogLevel::Error,
+            ..default()
+        });
+
+        app.add_schedule(GGRSSchedule, advance_schedule);
+        app.add_schedule(GGRSSaveSchedule, save_schedule);
+        app.add_schedule(GGRSLoadSchedule, load_schedule);
 
         stage.set_type_registry(self.type_registry);
         app.add_system(GGRSStage::<T>::run.in_base_set(CoreSet::PreUpdate));
+        app.add_system(GGRSStage::<T>::save_world_using_reflection.in_schedule(GGRSSaveSchedule));
+        app.add_system(GGRSStage::<T>::load_world_using_reflection.in_schedule(GGRSLoadSchedule));
         app.insert_resource(stage);
     }
 }
