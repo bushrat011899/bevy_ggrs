@@ -51,7 +51,7 @@ pub struct Velocity {
 }
 
 // You can also register resources.
-#[derive(Resource, Default, Reflect, Hash)]
+#[derive(Resource, Default, Reflect, Hash, Clone)]
 #[reflect(Hash)]
 pub struct FrameCount {
     pub frame: u32,

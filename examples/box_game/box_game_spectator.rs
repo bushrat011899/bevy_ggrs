@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use bevy::prelude::*;
-use bevy_ggrs::{GGRSPlugin, GGRSSchedule, Session};
+use bevy_ggrs::{GGRSPlugin, GGRSSchedule, Session, ResourceRollbackPlugin};
 use ggrs::{SessionBuilder, UdpNonBlockingSocket};
 use structopt::StructOpt;
 
@@ -52,6 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // continue building/running the app like you normally would
     app.insert_resource(opt)
         .add_plugins(DefaultPlugins)
+        .add_plugin(ResourceRollbackPlugin.for_type::<FrameCount>().with_config::<GGRSConfig>())
         .add_startup_system(setup_system)
         // these systems will be executed as part of the advance frame update
         .add_systems((move_cube_system, increase_frame_system).in_schedule(GGRSSchedule))

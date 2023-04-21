@@ -15,11 +15,13 @@ pub use ggrs;
 
 pub use rollback::{Rollback, RollbackFlag};
 pub use session::Session;
+pub use resource_snapshot::ResourceRollbackPlugin;
 
 pub(crate) mod ggrs_stage;
 pub(crate) mod world_snapshot;
 pub(crate) mod rollback;
 pub(crate) mod session;
+pub(crate) mod resource_snapshot;
 
 const DEFAULT_FPS: usize = 60;
 
@@ -136,6 +138,8 @@ impl<T: Config + Send + Sync> GGRSPlugin<T> {
         input_system.initialize(&mut app.world);
         let mut stage = GGRSStage::<T>::new(input_system);
         stage.set_update_frequency(self.fps);
+        stage.set_type_registry(self.type_registry);
+        app.insert_resource(stage);
 
         let mut advance_schedule = Schedule::default();
         let mut save_schedule = Schedule::default();
@@ -147,12 +151,12 @@ impl<T: Config + Send + Sync> GGRSPlugin<T> {
         });
 
         save_schedule.set_build_settings(ScheduleBuildSettings {
-            ambiguity_detection: LogLevel::Error,
+            ambiguity_detection: LogLevel::Warn,
             ..default()
         });
 
         load_schedule.set_build_settings(ScheduleBuildSettings {
-            ambiguity_detection: LogLevel::Error,
+            ambiguity_detection: LogLevel::Warn,
             ..default()
         });
 
@@ -160,10 +164,16 @@ impl<T: Config + Send + Sync> GGRSPlugin<T> {
         app.add_schedule(GGRSSaveSchedule, save_schedule);
         app.add_schedule(GGRSLoadSchedule, load_schedule);
 
-        stage.set_type_registry(self.type_registry);
         app.add_system(GGRSStage::<T>::run.in_base_set(CoreSet::PreUpdate));
-        app.add_system(GGRSStage::<T>::save_world_using_reflection.in_schedule(GGRSSaveSchedule));
-        app.add_system(GGRSStage::<T>::load_world_using_reflection.in_schedule(GGRSLoadSchedule));
-        app.insert_resource(stage);
+        app.add_system(
+            GGRSStage::<T>::save_world_using_reflection
+                .in_schedule(GGRSSaveSchedule)
+                .in_base_set(CoreSet::First)
+        );
+        app.add_system(
+            GGRSStage::<T>::load_world_using_reflection
+                .in_schedule(GGRSLoadSchedule)
+                .in_base_set(CoreSet::First)
+            );
     }
 }

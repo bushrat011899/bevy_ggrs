@@ -221,15 +221,12 @@ impl<T: Config> GGRSStage<T> {
         // if we are ahead, run slow
         self.run_slow = sess.frames_ahead() > 0;
 
-        // get local player handles
-        let local_handles = sess.local_player_handles();
-
         // get local player inputs
-        let mut local_inputs = Vec::new();
-        for &local_handle in &local_handles {
-            let input = self.input_system.run(local_handle, world);
-            local_inputs.push(input);
-        }
+        let local_inputs = sess
+            .local_player_handles()
+            .into_iter()
+            .map(|handle| (handle, self.input_system.run(handle, world)))
+            .collect::<Vec<_>>();
 
         // if session is ready, try to advance the frame
         let mut sess = world.get_resource_mut::<Session<T>>();
@@ -238,10 +235,12 @@ impl<T: Config> GGRSStage<T> {
             panic!("No GGRS P2PSession found. Please start a session and add it as a resource.");
         };
         if sess.current_state() == SessionState::Running {
-            for i in 0..local_inputs.len() {
-                sess.add_local_input(local_handles[i], local_inputs[i])
+            local_inputs.into_iter().for_each(|(handle, input)| {
+                sess
+                    .add_local_input(handle, input)
                     .expect("All handles in local_handles should be valid");
-            }
+            });
+        
             match sess.advance_frame() {
                 Ok(requests) => return requests,
                 Err(GGRSError::PredictionThreshold) => {
@@ -276,6 +275,7 @@ impl<T: Config> GGRSStage<T> {
     pub(crate) fn load_world_using_reflection(world: &mut World) {
         world.resource_scope(|world, mut stage: Mut<Self>| {
             let frame = world.get_resource::<Frame>().unwrap();
+            let _cell = world.get_resource::<GameStateCell<T>>().unwrap();
 
             stage.frame = frame.0;
     

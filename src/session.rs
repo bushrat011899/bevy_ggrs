@@ -80,7 +80,7 @@ impl<T: Config> Session<T> {
     /// Get the maximum prediction window.
     pub fn max_prediction_window(&self) -> usize {
         match self {
-            Self::SyncTestSession(_session) => 1,
+            Self::SyncTestSession(session) => session.max_prediction(),
             Self::P2PSession(session) => session.max_prediction(),
             Self::SpectatorSession(_session) => 0,
         }
