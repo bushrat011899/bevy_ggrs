@@ -7,16 +7,18 @@ use bevy::{
         schedule::{LogLevel, ScheduleBuildSettings, ScheduleLabel},
     },
     prelude::*,
-    utils::{Duration, HashMap},
+    utils::Duration,
 };
-use ggrs::{Config, InputStatus, P2PSession, PlayerHandle, SpectatorSession, SyncTestSession};
+use ggrs::{Config, P2PSession, PlayerHandle, SpectatorSession, SyncTestSession};
 use std::{fmt::Debug, hash::Hash, marker::PhantomData, net::SocketAddr};
 
 pub use ggrs;
 
+pub use input::*;
 pub use rollback::*;
 pub use snapshot::*;
 
+pub(crate) mod input;
 pub(crate) mod rollback;
 pub(crate) mod schedule_systems;
 pub(crate) mod snapshot;
@@ -34,7 +36,7 @@ pub mod prelude {
 /// If you require a more specialized configuration, you can create your own type implementing
 /// [`Config`](`ggrs::Config`).
 #[derive(Debug)]
-pub struct GgrsConfig<Input, Address = SocketAddr, State = u8> {
+pub struct GgrsConfig<Input = KeyboardAndMouseInput, Address = SocketAddr, State = u8> {
     _phantom: PhantomData<(Input, Address, State)>,
 }
 
@@ -63,10 +65,6 @@ pub enum Session<T: Config> {
     P2P(P2PSession<T>),
     Spectator(SpectatorSession<T>),
 }
-
-// TODO: more specific name to avoid conflicts?
-#[derive(Resource, Deref, DerefMut)]
-pub struct PlayerInputs<T: Config>(Vec<(T::Input, InputStatus)>);
 
 #[derive(Resource, Copy, Clone, Debug)]
 struct FixedTimestepData {
@@ -112,17 +110,9 @@ impl From<ConfirmedFrameCount> for i32 {
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MaxPredictionWindow(usize);
 
-/// Inputs from local players. You have to fill this resource in the ReadInputs schedule.
-#[derive(Resource)]
-pub struct LocalInputs<C: Config>(pub HashMap<PlayerHandle, C::Input>);
-
 /// Handles for the local players, you can use this when writing an input system.
 #[derive(Resource, Default)]
 pub struct LocalPlayers(pub Vec<PlayerHandle>);
-
-/// Label for the schedule which reads the inputs for the current frame
-#[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]
-pub struct ReadInputs;
 
 /// Label for the schedule which loads and overwrites a snapshot of the world.
 #[derive(ScheduleLabel, Debug, Hash, PartialEq, Eq, Clone)]

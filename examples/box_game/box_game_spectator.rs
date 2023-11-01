@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_ggrs::prelude::*;
+use bevy_ggrs::{prelude::*, KeyboardAndMouseInputPlugin};
 use clap::Parser;
 use ggrs::UdpNonBlockingSocket;
 use std::net::SocketAddr;
@@ -40,7 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // define frequency of rollback game logic update
         .set_rollback_schedule_fps(FPS)
         // this system will be executed as part of input reading
-        .add_systems(ReadInputs, read_local_inputs)
+        .add_plugins(KeyboardAndMouseInputPlugin::<BoxConfig>::default())
         // Rollback behavior can be customized using a variety of extension methods and plugins:
         // The FrameCount resource implements Copy, we can use that to have minimal overhead rollback
         .rollback_resource_with_copy::<FrameCount>()
@@ -51,7 +51,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup_system)
         // these systems will be executed as part of the advance frame update
-        .add_systems(GgrsSchedule, (move_cube_system, increase_frame_system))
+        .add_systems(
+            GgrsSchedule,
+            (move_cube_system, increase_frame_system, look_at_cursor).chain(),
+        )
         // add your GGRS session
         .insert_resource(Session::Spectator(sess))
         // register a resource that will be rolled back

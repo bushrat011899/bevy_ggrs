@@ -1,9 +1,7 @@
-use bevy::{prelude::*, utils::HashMap};
+use bevy::{prelude::*, window::PrimaryWindow};
 use bevy_ggrs::{
-    AddRollbackCommandExtension, GgrsConfig, LocalInputs, LocalPlayers, PlayerInputs, Rollback,
-    Session,
+    AddRollbackCommandExtension, GgrsConfig, KeyboardAndMouseInput, PlayerInputs, Rollback, Session,
 };
-use bytemuck::{Pod, Zeroable};
 use std::hash::Hash;
 
 const BLUE: Color = Color::rgb(0.8, 0.6, 0.2);
@@ -12,10 +10,10 @@ const MAGENTA: Color = Color::rgb(0.9, 0.2, 0.2);
 const GREEN: Color = Color::rgb(0.35, 0.7, 0.35);
 const PLAYER_COLORS: [Color; 4] = [BLUE, ORANGE, MAGENTA, GREEN];
 
-const INPUT_UP: u8 = 1 << 0;
-const INPUT_DOWN: u8 = 1 << 1;
-const INPUT_LEFT: u8 = 1 << 2;
-const INPUT_RIGHT: u8 = 1 << 3;
+const INPUT_UP: KeyCode = KeyCode::W;
+const INPUT_DOWN: KeyCode = KeyCode::S;
+const INPUT_LEFT: KeyCode = KeyCode::A;
+const INPUT_RIGHT: KeyCode = KeyCode::D;
 
 const MOVEMENT_SPEED: f32 = 0.005;
 const MAX_SPEED: f32 = 0.05;
@@ -25,13 +23,7 @@ const CUBE_SIZE: f32 = 0.2;
 
 // You need to define a config struct to bundle all the generics of GGRS. bevy_ggrs provides a sensible default in `GgrsConfig`.
 // (optional) You can define a type here for brevity.
-pub type BoxConfig = GgrsConfig<BoxInput>;
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Pod, Zeroable)]
-pub struct BoxInput {
-    pub inp: u8,
-}
+pub type BoxConfig = GgrsConfig<KeyboardAndMouseInput>;
 
 #[derive(Default, Component)]
 pub struct Player {
@@ -53,34 +45,8 @@ pub struct FrameCount {
     pub frame: u32,
 }
 
-pub fn read_local_inputs(
-    mut commands: Commands,
-    keyboard_input: Res<Input<KeyCode>>,
-    local_players: Res<LocalPlayers>,
-) {
-    let mut local_inputs = HashMap::new();
-
-    for handle in &local_players.0 {
-        let mut input: u8 = 0;
-
-        if keyboard_input.pressed(KeyCode::W) {
-            input |= INPUT_UP;
-        }
-        if keyboard_input.pressed(KeyCode::A) {
-            input |= INPUT_LEFT;
-        }
-        if keyboard_input.pressed(KeyCode::S) {
-            input |= INPUT_DOWN;
-        }
-        if keyboard_input.pressed(KeyCode::D) {
-            input |= INPUT_RIGHT;
-        }
-
-        local_inputs.insert(*handle, BoxInput { inp: input });
-    }
-
-    commands.insert_resource(LocalInputs::<BoxConfig>(local_inputs));
-}
+#[derive(Component)]
+pub struct Ground;
 
 pub fn setup_system(
     mut commands: Commands,
@@ -95,14 +61,17 @@ pub fn setup_system(
     };
 
     // plane
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane {
-            size: PLANE_SIZE,
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Plane {
+                size: PLANE_SIZE,
+                ..default()
+            })),
+            material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
             ..default()
-        })),
-        material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
-        ..default()
-    });
+        },
+        Ground,
+    ));
 
     // player cube - just spawn whatever entity you want, then add a `Rollback` component with a unique id (for example through the `RollbackIdProvider` resource).
     // Every entity that you want to be saved/loaded needs a `Rollback` component with a unique rollback id.
@@ -154,6 +123,43 @@ pub fn increase_frame_system(mut frame_count: ResMut<FrameCount>) {
     frame_count.frame += 1;
 }
 
+pub fn look_at_cursor(
+    mut query: Query<(&mut Transform, &Player), With<Rollback>>,
+    camera_query: Query<(&Camera, &GlobalTransform)>,
+    ground_query: Query<&GlobalTransform, With<Ground>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    inputs: Res<PlayerInputs<BoxConfig>>,
+) {
+    let window = windows.single();
+    let window_scale = Vec2::new(window.width(), window.height());
+    let (camera, camera_transform) = camera_query.single();
+    let ground = ground_query.single();
+
+    for (mut t, p) in query.iter_mut() {
+        let input = inputs[p.handle].0;
+
+        let Some(cursor_position_normalised) = input.mouse_position.get() else {
+            continue;
+        };
+
+        let cursor_position = cursor_position_normalised * window_scale;
+
+        // Calculate a ray pointing from the camera into the world based on the cursor's position.
+        let Some(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
+            continue;
+        };
+
+        // Calculate if and where the ray is hitting the ground plane.
+        let Some(distance) = ray.intersect_plane(ground.translation(), ground.up()) else {
+            continue;
+        };
+
+        let point = ray.get_point(distance);
+
+        t.look_at(point, ground.up());
+    }
+}
+
 // Example system that moves the cubes, will be added to the rollback schedule.
 // Filtering for the rollback component is a good way to make sure your game logic systems
 // only mutate components that are being saved/loaded.
@@ -163,26 +169,32 @@ pub fn move_cube_system(
     inputs: Res<PlayerInputs<BoxConfig>>,
 ) {
     for (mut t, mut v, p) in query.iter_mut() {
-        let input = inputs[p.handle].0.inp;
+        let input = inputs[p.handle].0;
+
+        let up = input.keyboard_buttons.get(INPUT_UP);
+        let down = input.keyboard_buttons.get(INPUT_DOWN);
+        let left = input.keyboard_buttons.get(INPUT_LEFT);
+        let right = input.keyboard_buttons.get(INPUT_RIGHT);
+
         // set velocity through key presses
-        if input & INPUT_UP != 0 && input & INPUT_DOWN == 0 {
+        if up && !down {
             v.z -= MOVEMENT_SPEED;
         }
-        if input & INPUT_UP == 0 && input & INPUT_DOWN != 0 {
+        if !up && down {
             v.z += MOVEMENT_SPEED;
         }
-        if input & INPUT_LEFT != 0 && input & INPUT_RIGHT == 0 {
+        if left && !right {
             v.x -= MOVEMENT_SPEED;
         }
-        if input & INPUT_LEFT == 0 && input & INPUT_RIGHT != 0 {
+        if !left && right {
             v.x += MOVEMENT_SPEED;
         }
 
         // slow down
-        if input & INPUT_UP == 0 && input & INPUT_DOWN == 0 {
+        if !up && !down {
             v.z *= FRICTION;
         }
-        if input & INPUT_LEFT == 0 && input & INPUT_RIGHT == 0 {
+        if !left && !right {
             v.x *= FRICTION;
         }
         v.y *= FRICTION;
