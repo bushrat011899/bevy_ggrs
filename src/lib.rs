@@ -1,4 +1,6 @@
 //! bevy_ggrs is a bevy plugin for the P2P rollback networking library GGRS.
+//!
+//! See [`GgrsPlugin`] for getting started.
 #![forbid(unsafe_code)] // let us try
 
 use bevy::{
@@ -26,9 +28,9 @@ pub(crate) mod time;
 pub mod prelude {
     pub use crate::{
         snapshot::prelude::*, AddRollbackCommandExtension, GgrsApp, GgrsConfig, GgrsPlugin,
-        GgrsSchedule, PlayerInputs, ReadInputs, Rollback, Session,
+        GgrsSchedule, GgrsTime, PlayerInputs, ReadInputs, Rollback, Session,
     };
-    pub use ggrs::{GGRSEvent as GgrsEvent, PlayerType, SessionBuilder};
+    pub use ggrs::{GgrsEvent, PlayerType, SessionBuilder};
 }
 
 /// A sensible default [GGRS Config](`ggrs::Config`) type suitable for most applications.
@@ -136,15 +138,6 @@ pub struct SaveWorld;
 pub struct AdvanceWorld;
 
 /// GGRS plugin for bevy.
-///
-/// # Rollback
-///
-/// This will provide rollback management for the following items in the Bevy ECS:
-/// - [Entities](`Entity`)
-/// - [Parent] and [Children] components
-/// - [Time]
-///
-/// To add more data to the rollback management, see the methods provided by [GgrsApp].
 ///
 /// # Rollback
 ///
@@ -301,6 +294,16 @@ pub trait GgrsApp {
     fn update_resource_with_map_entities<Type>(&mut self) -> &mut Self
     where
         Type: Resource + MapEntities;
+
+    /// Adds a component type to the checksum generation pipeline.
+    fn checksum_component<Type>(&mut self, hasher: for<'a> fn(&'a Type) -> u64) -> &mut Self
+    where
+        Type: Component;
+
+    /// Adds a resource type to the checksum generation pipeline.
+    fn checksum_resource<Type>(&mut self, hasher: for<'a> fn(&'a Type) -> u64) -> &mut Self
+    where
+        Type: Resource;
 }
 
 impl GgrsApp for App {
@@ -356,7 +359,7 @@ impl GgrsApp for App {
     where
         Type: Component + Hash,
     {
-        self.add_plugins(ComponentChecksumHashPlugin::<Type>::default())
+        self.add_plugins(ComponentChecksumPlugin::<Type>::default())
     }
 
     fn update_component_with_map_entities<Type>(&mut self) -> &mut Self
@@ -370,7 +373,7 @@ impl GgrsApp for App {
     where
         Type: Resource + Hash,
     {
-        self.add_plugins(ResourceChecksumHashPlugin::<Type>::default())
+        self.add_plugins(ResourceChecksumPlugin::<Type>::default())
     }
 
     fn update_resource_with_map_entities<Type>(&mut self) -> &mut Self
@@ -378,5 +381,19 @@ impl GgrsApp for App {
         Type: Resource + MapEntities,
     {
         self.add_plugins(ResourceMapEntitiesPlugin::<Type>::default())
+    }
+
+    fn checksum_component<Type>(&mut self, hasher: for<'a> fn(&'a Type) -> u64) -> &mut Self
+    where
+        Type: Component,
+    {
+        self.add_plugins(ComponentChecksumPlugin::<Type>(hasher))
+    }
+
+    fn checksum_resource<Type>(&mut self, hasher: for<'a> fn(&'a Type) -> u64) -> &mut Self
+    where
+        Type: Resource,
+    {
+        self.add_plugins(ResourceChecksumPlugin::<Type>(hasher))
     }
 }
